@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>React Stock Portfolio Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js UMD build for direct script tag loading -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <!-- Chart.js Datalabels Plugin CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Custom CSS for font-family if not fully covered by Tailwind or to ensure 'Inter' */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transformation in the browser (for development only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 
+        *** IMPORTANT ***
+        This script tag contains your React App components.
+        It has type="text/babel" so Babel transpiles the JSX.
+    -->
+    <script type="text/babel">
+        // Ensure React hooks are available globally via the React object
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // Register the datalabels plugin globally with Chart.js
+        Chart.register(ChartDataLabels);
+
+        const BACKEND_URL = 'http://127.0.0.1:5000/api/analyze-portfolio';
+
+        // Header Component
+        const Header = () => (
+          <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-xl p-8 mb-8 shadow-2xl border border-white border-opacity-20 transform transition-all duration-300 hover:shadow-3xl">
+            <h1 className="text-4xl md:text-5xl font-extrabold mb-4 text-center bg-gradient-to-r from-indigo-500 to-purple-600 bg-clip-text text-transparent">
+              📈 Stock Portfolio Dashboard
+            </h1>
+            <p className="text-center text-gray-600 text-lg md:text-xl">
+              Analyze your stock portfolio with real-time data and comprehensive insights
+            </p>
+          </div>
+        );
+
+        // Input Section Component
+        const InputSection = ({ onAnalyze, isLoading }) => {
+          const [dragOver, setDragOver] = useState(false);
+          const [dragError, setDragError] = useState(null);
+          const [statusMessage, setStatusMessage] = useState('Drag & Drop your .json portfolio file here');
+
+          const [portfolioInput, setPortfolioInput] = useState(''); 
+
+          const handleDragOver = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(true);
+            setDragError(null); 
+            setStatusMessage('Drop your file now!');
+          };
+
+          const handleDragLeave = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+            setStatusMessage('Drag & Drop your .json portfolio file here');
+          };
+
+          const handleDrop = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(null);
+            setDragError(null);
+
+            const files = e.dataTransfer.files;
+            if (files.length === 0) {
+              setDragError('No file dropped.');
+              setStatusMessage('No file dropped. Try again.');
+              return;
+            }
+            if (files.length > 1) {
+              setDragError('Please drop only one file at a time.');
+              setStatusMessage('Please drop only one file.');
+              return;
+            }
+
+            const file = files[0];
+            if (file.type !== 'application/json') {
+              setDragError('Please drop a JSON file.');
+              setStatusMessage('Only JSON files are accepted.');
+              return;
+            }
+
+            setStatusMessage(`Reading "${file.name}"...`);
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              try {
+                const jsonContent = event.target.result;
+                JSON.parse(jsonContent); 
+                setPortfolioInput(jsonContent);
+                onAnalyze(jsonContent); 
+                setDragError(null); 
+                setStatusMessage(`File "${file.name}" loaded. Analyzing...`);
+              } catch (error) {
+                const errMsg = 'Error reading or parsing JSON file: ' + error.message;
+                setDragError(errMsg);
+                setStatusMessage('File processing failed.');
+                console.error("Frontend JSON parsing error:", errMsg);
+              }
+            };
+            reader.onerror = () => {
+              const errMsg = 'Failed to read file.';
+              setDragError(errMsg);
+              setStatusMessage('File reading failed.');
+              console.error("Frontend File reading error:", errMsg);
+            };
+            reader.readAsText(file);
+          };
+
+          return (
+            <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-xl p-8 mb-8 shadow-2xl border border-white border-opacity-20">
+              <h2 className="text-3xl font-semibold text-gray-800 mb-6">📊 Portfolio Configuration</h2>
+              <p className="mb-4 text-gray-600">Drag and drop your portfolio JSON file below:</p>
+              
+              <div
+                className={`w-full min-h-[200px] flex items-center justify-center p-4 border-2 border-dashed rounded-xl transition-all duration-300
+                  ${dragOver ? 'border-indigo-500 bg-indigo-50 bg-opacity-50' : 'border-gray-300 bg-gray-50'}
+                  ${dragError ? 'border-red-500' : ''}
+                `}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                {isLoading ? (
+                    <div className="text-center">
+                        <div className="inline-block w-10 h-10 border-4 border-gray-200 border-t-4 border-t-indigo-500 rounded-full animate-spin mb-2"></div>
+                        <p className="text-gray-600">Fetching live data... This may take a few moments.</p>
+                    </div>
+                ) : dragError ? (
+                  <p className="text-red-600 font-semibold text-center">{dragError}</p>
+                ) : (
+                  <p className="text-gray-500 text-lg">
+                    {statusMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        const ChartsSection = ({ portfolioData, processedStockData }) => {
+          const sectorChartRef = useRef(null);
+          const categoryChartRef = useRef(null);
+          const holdingsWeightChartRef = useRef(null);
+
+          const sectorChartInstance = useRef(null);
+          const categoryChartInstance = useRef(null);
+          const holdingsWeightChartInstance = useRef(null);
+
+          // Helper function to create or update a donut chart
+          const createOrUpdateDonutChart = (chartRef, chartInstanceRef, title, labels, data, legendPosition = 'right') => {
+            if (chartRef.current && typeof Chart !== 'undefined') {
+              if (chartInstanceRef.current) {
+                chartInstanceRef.current.destroy();
+              }
+
+              const allDataZero = data.every(val => val === 0);
+              if (labels.length === 0 || allDataZero) {
+                console.log(`ChartsSection: Not drawing "${title}" chart because data is empty or all zeros. Labels:`, labels, "Data:", data);
+                const ctx = chartRef.current.getContext('2d');
+                ctx.clearRect(0, 0, chartRef.current.width, chartRef.current.height);
+                const messageElement = chartRef.current.parentNode.querySelector('.chart-no-data-message');
+                if (messageElement) {
+                    messageElement.textContent = `No data to display for "${title}"`;
+                    messageElement.style.display = 'block';
+                }
+                return; 
+              } else {
+                 const messageElement = chartRef.current.parentNode.querySelector('.chart-no-data-message');
+                if (messageElement) {
+                    messageElement.style.display = 'none';
+                }
+              }
+
+              const ctx = chartRef.current.getContext('2d');
+              const newChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                  labels: labels,
+                  datasets: [{
+                    data: data,
+                    backgroundColor: [
+                      '#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe',
+                      '#8e44ad', '#2ecc71', '#e67e22', '#a8e063', '#fdc830', '#00c6ff',
+                      '#1abc9c', '#3498db', '#9b59b6', '#f1c40f', '#e74c3c', '#d35400',
+                      '#27ae60', '#c0392b', '#95a5a6', '#f39c12', '#d35400', '#2980b9' 
+                    ],
+                    borderColor: 'rgba(255, 255, 255, 0.8)', 
+                    borderWidth: 1,
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false, 
+                  plugins: {
+                    legend: {
+                      position: legendPosition, 
+                      labels: {
+                        font: {
+                          family: 'Inter',
+                          size: 12 
+                        },
+                        boxWidth: 20, 
+                        padding: 10 
+                      }
+                    },
+                    title: {
+                      display: true,
+                      text: title,
+                      font: {
+                        family: 'Inter',
+                        size: 20, 
+                        weight: 'bold'
+                      },
+                      color: '#374151' 
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: function(context) {
+                          let label = context.label || '';
+                          if (label) {
+                            label += ': ';
+                          }
+                          if (context.parsed !== null) {
+                            label += '$' + context.parsed.toLocaleString('en-US', { maximumFractionDigits: 2 });
+                            const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+                            const percentage = (context.parsed / total * 100).toFixed(2);
+                            label += ` (${percentage}%)`;
+                          }
+                          return label;
+                        }
+                      },
+                      titleFont: {
+                        family: 'Inter'
+                      },
+                      bodyFont: {
+                        family: 'Inter'
+                      }
+                    },
+                    datalabels: { 
+                        color: '#fff', 
+                        font: {
+                            family: 'Inter',
+                            size: 14,
+                            weight: 'bold',
+                        },
+                        textAlign: 'center',
+                        formatter: (value, context) => {
+                            const total = context.dataset.data.reduce((sum, dataPoint) => sum + dataPoint, 0);
+                            const percentage = (value / total * 100).toFixed(1); 
+                            return percentage + '%';
+                        },
+                        display: 'auto', 
+                        textStrokeColor: 'rgba(0,0,0,0.6)', 
+                        textStrokeWidth: 2,
+                    }
+                  },
+                  cutout: '60%' 
+                }
+              });
+              chartInstanceRef.current = newChart;
+            } else if (chartRef.current && chartInstanceRef.current) {
+                chartInstanceRef.current.destroy();
+                chartInstanceRef.current = null;
+            }
+          };
+
+          // Data aggregation
+          const aggregateData = (items, key) => {
+            const aggregated = {};
+            Object.values(items).forEach(stock => { 
+              if (stock && stock.currentValue !== undefined && stock.currentValue !== null) { 
+                const groupKey = stock[key]; 
+                if (groupKey) { 
+                    aggregated[groupKey] = (aggregated[groupKey] || 0) + stock.currentValue;
+                } else {
+                    console.warn(`ChartsSection: Skipping ${stock.symbol} for aggregation under key "${key}". Group key is missing.`);
+                }
+              } else {
+                console.warn(`ChartsSection: Skipping ${stock.symbol} for aggregation. Stock data missing or currentValue invalid.`);
+              }
+            });
+            return {
+              labels: Object.keys(aggregated),
+              data: Object.values(aggregated)
+            };
+          };
+
+          // Prepare data for Sector, Category, and Holdings Weight
+          const allProcessedItems = Object.values(processedStockData);
+          console.log("ChartsSection: All processed items from backend for aggregation:", allProcessedItems);
+
+          const sectorChartData = aggregateData(allProcessedItems, 'sector'); 
+          const categoryChartData = aggregateData(allProcessedItems, 'category'); 
+          
+          const holdingsWeightData = {
+            labels: allProcessedItems.map(item => item.symbol),
+            data: allProcessedItems.map(item => item.currentValue || 0)
+          };
+
+          // Filter out labels with zero data for cleaner charts
+          const filterZeroData = (dataObj) => {
+            const filteredLabels = [];
+            const filteredData = [];
+            dataObj.data.forEach((val, index) => {
+                if (val > 0) { 
+                    filteredData.push(val);
+                    filteredLabels.push(dataObj.labels[index]);
+                }
+            });
+            return { labels: filteredLabels, data: filteredData };
+          };
+
+          const filteredSectorChartData = filterZeroData(sectorChartData);
+          const filteredCategoryChartData = filterZeroData(categoryChartData);
+          const filteredHoldingsWeightData = filterZeroData(holdingsWeightData);
+
+
+          useEffect(() => {
+            console.log("ChartsSection: Updating Sector Chart with data:", filteredSectorChartData);
+            createOrUpdateDonutChart(sectorChartRef, sectorChartInstance, 'Portfolio by Sector', filteredSectorChartData.labels, filteredSectorChartData.data, 'right');
+            return () => { 
+              if (sectorChartInstance.current) sectorChartInstance.current.destroy();
+              sectorChartInstance.current = null;
+            };
+          }, [filteredSectorChartData]);
+
+          useEffect(() => {
+            console.log("ChartsSection: Updating Category Chart with data:", filteredCategoryChartData);
+            createOrUpdateDonutChart(categoryChartRef, categoryChartInstance, 'Portfolio by Category', filteredCategoryChartData.labels, filteredCategoryChartData.data, 'right');
+            return () => { 
+              if (categoryChartInstance.current) categoryChartInstance.current.destroy();
+              categoryChartInstance.current = null;
+            };
+          }, [filteredCategoryChartData]);
+
+          useEffect(() => {
+            console.log("ChartsSection: Updating Holdings Weight Chart with data:", filteredHoldingsWeightData);
+            createOrUpdateDonutChart(holdingsWeightChartRef, holdingsWeightChartInstance, 'Holdings Weight by Symbol', filteredHoldingsWeightData.labels, filteredHoldingsWeightData.data, 'right');
+            return () => { 
+              if (holdingsWeightChartInstance.current) holdingsWeightChartInstance.current.destroy();
+              holdingsWeightChartInstance.current = null;
+            };
+          }, [filteredHoldingsWeightData]);
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-8">
+              <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-xl p-6 shadow-2xl border border-white border-opacity-20 h-[500px] relative flex items-center justify-center"> 
+                <canvas ref={sectorChartRef}></canvas>
+                <div className="chart-no-data-message absolute text-gray-500 text-center hidden"></div>
+              </div>
+              <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-xl p-6 shadow-2xl border border-white border-opacity-20 h-[500px] relative flex items-center justify-center"> 
+                <canvas ref={categoryChartRef}></canvas>
+                <div className="chart-no-data-message absolute text-gray-500 text-center hidden"></div>
+              </div>
+              <div className="bg-white bg-opacity-95 backdrop-blur-xl rounded-xl p-6 shadow-2xl border border-white border-opacity-20 h-[500px] relative flex items-center justify-center"> 
+                <canvas ref={holdingsWeightChartRef}></canvas>
+                <div className="chart-no-data-message absolute text-gray-500 text-center hidden"></div>
+              </div>
+            </div>
+          );
+        };
+
+        // Main App Component
+        function App() {
+          const [portfolioData, setPortfolioData] = useState([]); 
+          const [processedStockData, setProcessedStockData] = useState({}); 
+          const [isLoading, setIsLoading] = useState(false);
+          const [error, setError] = useState(null);
+          const [dashboardActive, setDashboardActive] = useState(false);
+          const [failedStocks, setFailedStocks] = useState([]); // New state for failed stocks
+
+          const analyzePortfolio = useCallback(async (input) => {
+            setIsLoading(true);
+            setError(null);
+            setDashboardActive(false); 
+            setFailedStocks([]); // Reset failed stocks on new analysis
+
+            try {
+              const rawPortfolio = JSON.parse(input);
+              if (!Array.isArray(rawPortfolio) || rawPortfolio.length === 0) {
+                throw new Error('Please provide a valid array of portfolio items.');
+              }
+              setPortfolioData(rawPortfolio); 
+
+              const backendPayloadPortfolio = rawPortfolio.map(item => ({
+                symbol: item.Symbol, 
+                bolsa: item.bolsa || "N/A", 
+                CI: item.CI, 
+                holdings: item.Holdings,
+                Category: item.Category, 
+                Sector: item.Sector      
+              }));
+
+              console.log("Frontend: Sending payload to backend:", backendPayloadPortfolio);
+
+              const response = await fetch(BACKEND_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ portfolio: backendPayloadPortfolio }), 
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+              }
+
+              const data = await response.json();
+              if (!data.success) {
+                throw new Error(data.error || 'Backend analysis failed');
+              }
+
+              console.log("Frontend: Received data from backend:", data.stockData);
+              setProcessedStockData(data.stockData); 
+
+              // Identify and store failed stocks for display
+              const currentFailedStocks = [];
+              for (const symbolKey in data.stockData) {
+                  if (data.stockData[symbolKey].error) {
+                      currentFailedStocks.push({
+                          symbol: data.stockData[symbolKey].symbol,
+                          category: data.stockData[symbolKey].category, // Use category from backend response
+                          sector: data.stockData[symbolKey].sector,     // Use sector from backend response
+                          message: data.stockData[symbolKey].error
+                      });
+                  }
+              }
+              setFailedStocks(currentFailedStocks);
+              
+              setDashboardActive(true); 
+
+            } catch (err) {
+              console.error('Frontend Error: Error analyzing portfolio:', err);
+              setError(err.message);
+            } finally {
+              setIsLoading(false);
+            }
+          }, []); 
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-600 to-purple-800 text-gray-900 font-inter p-4 sm:p-8">
+              <div className="max-w-7xl mx-auto py-8">
+                <Header />
+                <InputSection onAnalyze={analyzePortfolio} isLoading={isLoading} />
+
+                {isLoading && (
+                  <div className="text-center py-12">
+                    <div className="inline-block w-16 h-16 border-4 border-gray-200 border-t-4 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
+                    <p className="text-white text-xl">Fetching stock data... This may take a few moments.</p>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-red-100 text-red-800 p-6 rounded-xl border border-red-300 shadow-md my-8 text-center text-lg">
+                    Error: {error}
+                  </div>
+                )}
+
+                {/* New section to display failed stocks */}
+                {failedStocks.length > 0 && (
+                    <div className="bg-red-50 bg-opacity-95 backdrop-blur-xl rounded-xl p-6 mt-8 shadow-2xl border border-red-200">
+                        <h2 className="text-2xl font-semibold text-red-800 mb-4">⚠️ Data Retrieval Warnings</h2>
+                        <p className="text-red-700 mb-4">
+                            The following portfolio items could not retrieve live market data. Their values on the charts below will reflect an invested amount of $0 and performance metrics will be 0.
+                        </p>
+                        <ul className="list-disc list-inside text-red-700">
+                            {failedStocks.map((stock, index) => (
+                                <li key={index} className="mb-1">
+                                    <span className="font-bold">{stock.symbol}</span> ({stock.category} / {stock.sector}): {stock.message}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
+                {dashboardActive && !isLoading && !error && (
+                  <div id="dashboard" className="transition-opacity duration-500 ease-in-out opacity-100">
+                    <ChartsSection portfolioData={portfolioData} processedStockData={processedStockData} />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App, null));
+    </script>
+</body>
+</html>
